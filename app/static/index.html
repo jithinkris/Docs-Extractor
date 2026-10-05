@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DocExtract</title>
+<style>
+:root{--bg:#f6f7f4;--ink:#1d2421;--mute:#6a746f;--line:#d9ddd6;--accent:#1f5f4a;--warn:#b4531a;--card:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#141816;--ink:#e8ece9;--mute:#8f9a94;--line:#2b332f;--accent:#5fc3a0;--warn:#e89a62;--card:#1b211e}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 "Inter",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+h1{font-size:18px;margin:0}main{display:grid;grid-template-columns:340px 1fr;min-height:calc(100vh - 66px)}
+@media(max-width:800px){main{grid-template-columns:1fr}}
+aside{border-right:1px solid var(--line);padding:16px;overflow:auto}
+.drop{border:1.5px dashed var(--line);padding:22px;text-align:center;color:var(--mute);cursor:pointer;border-radius:6px;margin-bottom:14px}
+.drop:hover,.drop.over{border-color:var(--accent);color:var(--accent)}
+.row{padding:10px;border-bottom:1px solid var(--line);cursor:pointer}.row:hover,.row.sel{background:var(--card)}
+.row b{display:block}.row small{color:var(--mute)}
+.tag{font-size:12px;padding:1px 8px;border-radius:10px;border:1px solid var(--accent);color:var(--accent)}
+.tag.warn{border-color:var(--warn);color:var(--warn)}
+section{padding:24px 28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+label{display:block;font-size:13px;color:var(--mute)}input{width:100%;padding:7px 9px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:4px;font:inherit}
+table{width:100%;border-collapse:collapse;margin:10px 0;overflow-x:auto;display:block}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line)}
+button{background:var(--accent);color:var(--bg);border:0;padding:9px 16px;border-radius:4px;font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.flags{color:var(--warn);margin:8px 0}pre{background:var(--card);padding:12px;overflow:auto;max-height:240px;font-size:12px;border:1px solid var(--line)}
+.empty{color:var(--mute);padding:40px 0}
+</style></head><body>
+<header><h1>DocExtract</h1><span id="status" style="color:var(--mute)"></span></header>
+<main>
+<aside>
+  <div class="drop" id="drop" tabindex="0">Drop an invoice or receipt (PDF, JPG, PNG) or click to upload</div>
+  <input type="file" id="file" accept=".pdf,.jpg,.jpeg,.png" hidden>
+  <div id="list"></div>
+</aside>
+<section id="detail"><div class="empty">Upload a document or pick one from the list.</div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s);let current=null;
+async function loadList(){
+  const docs=await (await fetch('/api/documents')).json();
+  $('#list').innerHTML=docs.length?docs.map(d=>`<div class="row ${d.id===current?'sel':''}" onclick="open_('${d.id}')">
+    <b>${d.vendor||d.filename}</b><small>${d.total??''} · ${d.doc_type}</small>
+    <span class="tag ${d.quality?.needs_review?'warn':''}">${d.quality?.needs_review?'needs review':'ok'}</span></div>`).join(''):'<div class="empty">No documents yet.</div>';
+}
+async function upload(f){
+  $('#status').textContent='Processing '+f.name+'…';
+  const fd=new FormData();fd.append('file',f);
+  const r=await fetch('/api/documents',{method:'POST',body:fd});
+  $('#status').textContent=r.ok?'':'Upload failed: '+(await r.json()).detail;
+  if(r.ok){const d=await r.json();current=d.id;render(d);}loadList();
+}
+async function open_(id){current=id;render(await (await fetch('/api/documents/'+id)).json());loadList();}
+function render(d){
+  const x=d.data,q=d.quality;
+  if(!x){$('#detail').innerHTML=`<h2>${d.filename}</h2><p class="flags">${q.flags.join(', ')}</p><pre>${d.raw_text}</pre>`;return;}
+  const f=(k,l,t='text')=>`<div><label>${l}<input data-k="${k}" type="${t}" value="${x[k]??''}"></label></div>`;
+  $('#detail').innerHTML=`<h2>${x.vendor_name} — ${x.invoice_number||''}</h2>
+  <span class="tag ${q.needs_review?'warn':''}">confidence ${Math.round(q.overall*100)}%</span>
+  <div class="flags">${q.flags.map(s=>s.replaceAll('_',' ')).join(' · ')}</div>
+  <div class="grid">${f('vendor_name','Vendor')}${f('invoice_number','Bill / invoice number')}${f('invoice_date','Date','date')}${f('due_date','Due date','date')}${f('currency','Currency')}${f('subtotal','Subtotal')}${f('tax','Tax')}${f('total','Total')}</div>
+  <table><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr>
+  ${x.line_items.map(i=>`<tr><td>${i.description}</td><td>${i.quantity??''}</td><td>${i.unit_price??''}</td><td>${i.amount}</td></tr>`).join('')}</table>
+  <button onclick="save('${d.id}')">Confirm and save</button>
+  <details><summary>Extracted text</summary><pre>${d.raw_text}</pre></details>`;
+  window._d=d;
+}
+async function save(id){
+  const data=structuredClone(window._d.data);
+  document.querySelectorAll('[data-k]').forEach(i=>data[i.dataset.k]=i.value||null);
+  const r=await fetch('/api/documents/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+  if(r.ok){render(await r.json());loadList();$('#status').textContent='Saved';}
+}
+const drop=$('#drop'),file=$('#file');
+drop.onclick=()=>file.click();drop.onkeydown=e=>e.key==='Enter'&&file.click();
+file.onchange=()=>file.files[0]&&upload(file.files[0]);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');upload(e.dataTransfer.files[0])};
+loadList();
+</script></body></html>

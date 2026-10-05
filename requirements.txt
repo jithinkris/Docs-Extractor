@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart
+pydantic>=2.6
+pymupdf
+pytesseract
+pillow
+openai
+streamlit
+pandas

@@ -1,0 +1,18 @@
+# Local environment and secrets
+.env
+.venv/
+venv/
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local document uploads and extracted records
+/data/
+
+# Local Streamlit configuration
+.streamlit/secrets.toml
+
+# macOS
+.DS_Store
